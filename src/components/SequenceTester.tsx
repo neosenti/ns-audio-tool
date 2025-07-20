@@ -1,5 +1,6 @@
 // src/components/SequenceTester.tsx
-import { useState, useCallback, useEffect } from "react";
+
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   DndContext,
   closestCenter,
@@ -19,7 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import Dropzone from "react-dropzone";
 import localforage from "localforage";
-import { type SequenceItem } from "@/lib/types";
+import WaveSurfer from "wavesurfer.js";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -41,55 +42,126 @@ import {
   PlusCircle,
   GripVertical,
   ChevronsUpDown,
+  Square,
+  Check,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-// Local type for audio clips within this component
+// =================================================================================
+// Types
+// =================================================================================
 interface TesterAudioClip {
-  id: string;
+  id: string; // Unique ID for the uploaded clip
   name: string;
   buffer: AudioBuffer;
 }
 
-// Local type for storing raw audio data
+interface SequenceItem {
+  id: string; // Unique ID for the item *in the sequence*
+  audioId: string; // ID of the clip from the `clips` array
+  delayAfter: number; // The delay in ms that follows this audio
+}
+
 interface StoredClipData {
   id: string;
   name: string;
   data: ArrayBuffer;
 }
 
-// --- Local Storage Keys ---
-const CLIPS_STORAGE_KEY = "audio_tool_clips_v2";
-const SEQUENCE_STORAGE_KEY = "audio_tool_sequence_v2";
+// =================================================================================
+// Constants
+// =================================================================================
+const CLIPS_STORAGE_KEY = "audio_tool_clips_v3";
+const SEQUENCE_STORAGE_KEY = "audio_tool_sequence_v3";
+const delayOptions = [500, 250, 100, 50, 0, -50, -100, -250, -500].map((v) => ({
+  value: v.toString(),
+  label: `${v} ms`,
+}));
 
-// --- Delay Options ---
-const delayOptions = Array.from({ length: 11 }, (_, i) => (i - 5) * 100).map(
-  (v) => ({ value: v.toString(), label: `${v} ms` })
-);
+// =================================================================================
+// Helper Function
+// =================================================================================
+const bufferToWave = (abuffer: AudioBuffer): Blob => {
+  const numOfChan = abuffer.numberOfChannels;
+  const L = abuffer.length * numOfChan * 2 + 44;
+  const buffer = new ArrayBuffer(L);
+  const view = new DataView(buffer);
+  const channels = [];
+  let i,
+    sample,
+    offset = 0,
+    pos = 0;
+  setUint32(0x46464952);
+  setUint32(L - 8);
+  setUint32(0x45564157);
+  setUint32(0x20746d66);
+  setUint32(16);
+  setUint16(1);
+  setUint16(numOfChan);
+  setUint32(abuffer.sampleRate);
+  setUint32(abuffer.sampleRate * 2 * numOfChan);
+  setUint16(numOfChan * 2);
+  setUint16(16);
+  setUint32(0x61746164);
+  setUint32(L - pos - 4);
+  for (i = 0; i < abuffer.numberOfChannels; i++)
+    channels.push(abuffer.getChannelData(i));
+  while (pos < L) {
+    for (i = 0; i < numOfChan; i++) {
+      sample = Math.max(-1, Math.min(1, channels[i][offset]));
+      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+      view.setInt16(pos, sample, true);
+      pos += 2;
+    }
+    offset++;
+  }
+  return new Blob([view], { type: "audio/wav" });
+  function setUint16(data: number) {
+    view.setUint16(pos, data, true);
+    pos += 2;
+  }
+  function setUint32(data: number) {
+    view.setUint32(pos, data, true);
+    pos += 4;
+  }
+};
 
 // =================================================================================
 // Sortable Audio Item Component
 // =================================================================================
 const SortableAudioItem = ({
-  item,
+  id,
   clip,
+  isPlaying,
   onRemove,
 }: {
-  item: SequenceItem;
+  id: string;
   clip?: TesterAudioClip;
+  isPlaying: boolean;
   onRemove: () => void;
 }) => {
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: item.id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: isDragging ? "none" : "transform 0.25s ease",
+    zIndex: isDragging ? 10 : "auto",
   };
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 p-2 bg-card border rounded-lg touch-none"
+      className={cn(
+        "flex items-center gap-2 p-2 bg-background border rounded-lg touch-none relative",
+        isPlaying && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+      )}
     >
       <button {...attributes} {...listeners} className="cursor-grab p-1">
         <GripVertical className="h-5 w-5 text-muted-foreground" />
@@ -116,25 +188,23 @@ const DelayControl = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState(value.toString());
-
   useEffect(() => {
     setInputValue(value.toString());
   }, [value]);
-
   const handleSelect = (currentValue: string) => {
     onUpdate(Number(currentValue));
-    setInputValue(currentValue);
     setOpen(false);
   };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const numValue = parseInt(e.target.value, 10);
-    setInputValue(e.target.value);
-    if (!isNaN(numValue)) {
-      onUpdate(numValue);
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      const num = parseInt(inputValue, 10);
+      if (!isNaN(num)) {
+        onUpdate(num);
+        setOpen(false);
+        e.currentTarget.blur();
+      }
     }
   };
-
   return (
     <div className="flex justify-center items-center my-1">
       <Popover open={open} onOpenChange={setOpen}>
@@ -142,7 +212,6 @@ const DelayControl = ({
           <Button
             variant="outline"
             role="combobox"
-            aria-expanded={open}
             className="w-[150px] justify-between"
           >
             {value} ms
@@ -152,10 +221,10 @@ const DelayControl = ({
         <PopoverContent className="w-[200px] p-0">
           <Command>
             <CommandInput
-              placeholder="Set delay (ms)..."
+              placeholder="Set custom delay..."
               value={inputValue}
               onValueChange={setInputValue}
-              onBlur={handleInputChange}
+              onKeyDown={handleKeyDown}
             />
             <CommandList>
               <CommandEmpty>No results.</CommandEmpty>
@@ -166,6 +235,14 @@ const DelayControl = ({
                     value={option.value}
                     onSelect={handleSelect}
                   >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        value.toString() === option.value
+                          ? "opacity-100"
+                          : "opacity-0"
+                      )}
+                    />
                     {option.label}
                   </CommandItem>
                 ))}
@@ -179,6 +256,49 @@ const DelayControl = ({
 };
 
 // =================================================================================
+// Playback Visualizer Component
+// =================================================================================
+const PlaybackVisualizer = ({ clip }: { clip: TesterAudioClip | null }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const wavesurferRef = useRef<WaveSurfer | null>(null);
+  useEffect(() => {
+    if (containerRef.current) {
+      wavesurferRef.current = WaveSurfer.create({
+        container: containerRef.current,
+        height: 100,
+        waveColor: "hsl(var(--muted-foreground))",
+        progressColor: "hsl(var(--primary))",
+        barWidth: 3,
+        barRadius: 3,
+        barGap: 2,
+        interact: false,
+      });
+    }
+    return () => wavesurferRef.current?.destroy();
+  }, []);
+  useEffect(() => {
+    if (wavesurferRef.current && clip) {
+      const blob = bufferToWave(clip.buffer);
+      const url = URL.createObjectURL(blob);
+      wavesurferRef.current.load(url).then(() => {
+        URL.revokeObjectURL(url);
+      });
+    }
+  }, [clip]);
+  if (!clip) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Now Playing: {clip.name}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div ref={containerRef} />
+      </CardContent>
+    </Card>
+  );
+};
+
+// =================================================================================
 // Main Sequence Tester Component
 // =================================================================================
 const SequenceTester = () => {
@@ -188,14 +308,19 @@ const SequenceTester = () => {
     const savedSequence = localStorage.getItem(SEQUENCE_STORAGE_KEY);
     return savedSequence ? JSON.parse(savedSequence) : [];
   });
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentlyPlayingSequenceItemId, setCurrentlyPlayingSequenceItemId] =
+    useState<string | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const scheduledTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // --- Load clips from localforage on initial render ---
   useEffect(() => {
+    localforage.config({ name: "audioTool" });
     async function loadClips() {
       setIsLoading(true);
       const savedClipsData = await localforage.getItem<StoredClipData[]>(
@@ -211,11 +336,7 @@ const SequenceTester = () => {
             );
             loadedClips.push({ id: clipData.id, name: clipData.name, buffer });
           } catch (e) {
-            console.error(
-              "Failed to decode saved audio data for",
-              clipData.name,
-              e
-            );
+            console.error("Failed to decode saved audio data", e);
           }
         }
         setClips(loadedClips);
@@ -225,12 +346,10 @@ const SequenceTester = () => {
     loadClips();
   }, []);
 
-  // --- Save sequence to localStorage on change ---
   useEffect(() => {
     localStorage.setItem(SEQUENCE_STORAGE_KEY, JSON.stringify(sequence));
   }, [sequence]);
 
-  // --- File Upload Handler ---
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const audioContext = new AudioContext();
     const newClipsPromises = acceptedFiles.map(
@@ -268,7 +387,6 @@ const SequenceTester = () => {
           }
         )
     );
-
     try {
       const results = await Promise.all(newClipsPromises);
       setClips((prev) => [...prev, ...results.map((r) => r.clip)]);
@@ -283,71 +401,25 @@ const SequenceTester = () => {
     }
   }, []);
 
-  // --- Sequence Manipulation ---
   const addAudioToSequence = (clip: TesterAudioClip) => {
-    const newAudioItem: SequenceItem = {
-      type: "audio",
-      id: `audio-${Date.now()}`,
+    const newSequenceItem: SequenceItem = {
+      id: `seq_item_${Date.now()}`,
       audioId: clip.id,
+      delayAfter: 100,
     };
-    if (sequence.length > 0) {
-      const newDelayItem: SequenceItem = {
-        type: "delay",
-        id: `delay-${Date.now()}`,
-        value: 100,
-      };
-      setSequence((prev) => [...prev, newDelayItem, newAudioItem]);
-    } else {
-      setSequence([newAudioItem]);
-    }
-  };
-
-  const updateDelay = (index: number, value: number) => {
-    setSequence(
-      (prev) =>
-        prev.map((item, i) =>
-          i === index ? { ...item, value } : item
-        ) as SequenceItem[]
-    );
+    setSequence((prev) => [...prev, newSequenceItem]);
   };
 
   const removeFromSequence = (idToRemove: string) => {
-    setSequence((prev) => {
-      const index = prev.findIndex((item) => item.id === idToRemove);
-      if (index === -1) return prev;
-      if (index > 0 && prev[index - 1].type === "delay") {
-        return prev.filter((_, i) => i !== index && i !== index - 1);
-      } else if (index === 0 && prev.length > 1 && prev[1].type === "delay") {
-        return prev.slice(2);
-      }
-      return prev.filter((item) => item.id !== idToRemove);
-    });
+    setSequence((prev) => prev.filter((item) => item.id !== idToRemove));
   };
 
-  // --- Drag and Drop Handler ---
-  const normalizeDelays = (items: SequenceItem[]): SequenceItem[] => {
-    if (items.length < 2) return items;
-    const result: SequenceItem[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const currentItem = items[i];
-      const prevItemInResult = result[result.length - 1];
-      if (
-        currentItem.type === "delay" &&
-        (!prevItemInResult || prevItemInResult.type === "delay")
+  const updateDelay = (idToUpdate: string, delay: number) => {
+    setSequence((prev) =>
+      prev.map((item) =>
+        item.id === idToUpdate ? { ...item, delayAfter: delay } : item
       )
-        continue;
-      if (currentItem.type === "audio" && prevItemInResult?.type === "audio") {
-        result.push({
-          type: "delay",
-          id: `delay-${Date.now()}-${i}`,
-          value: 100,
-        });
-      }
-      result.push(currentItem);
-    }
-    if (result[0]?.type === "delay") result.shift();
-    if (result[result.length - 1]?.type === "delay") result.pop();
-    return result;
+    );
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -356,34 +428,66 @@ const SequenceTester = () => {
       setSequence((items) => {
         const oldIndex = items.findIndex((item) => item.id === active.id);
         const newIndex = items.findIndex((item) => item.id === over.id);
-        const newItems = arrayMove(items, oldIndex, newIndex);
-        return normalizeDelays(newItems);
+        return arrayMove(items, oldIndex, newIndex);
       });
     }
   };
 
-  // --- Playback Logic ---
-  const playSequence = () => {
-    const audioContext = new AudioContext();
-    let startTime = audioContext.currentTime + 0.1;
+  const stopPlayback = () => {
+    if (audioContextRef.current?.state !== "closed") {
+      audioContextRef.current?.close();
+    }
+    scheduledTimeoutsRef.current.forEach(clearTimeout);
+    scheduledTimeoutsRef.current = [];
+    setIsPlaying(false);
+    setCurrentlyPlayingSequenceItemId(null);
+  };
 
-    sequence.forEach((item) => {
-      if (item.type === "audio") {
-        const audio = clips.find((c) => c.id === item.audioId);
-        if (audio) {
-          const source = audioContext.createBufferSource();
-          source.buffer = audio.buffer;
-          source.connect(audioContext.destination);
-          source.start(startTime);
-          startTime += audio.buffer.duration;
-        } else {
-          console.warn(`Audio clip for sequence item ${item.id} not found!`);
+  const playSequence = () => {
+    if (isPlaying) {
+      stopPlayback();
+      return;
+    }
+    setIsPlaying(true);
+    setCurrentlyPlayingSequenceItemId(null);
+    audioContextRef.current = new AudioContext();
+    let startTime = audioContextRef.current.currentTime + 0.1;
+
+    sequence.forEach((item, index) => {
+      const audio = clips.find((c) => c.id === item.audioId);
+      if (audio) {
+        const source = audioContextRef.current!.createBufferSource();
+        source.buffer = audio.buffer;
+        source.connect(audioContextRef.current!.destination);
+        source.start(startTime);
+        const visualizerDelay =
+          (startTime - audioContextRef.current!.currentTime) * 1000;
+        scheduledTimeoutsRef.current.push(
+          setTimeout(
+            () => setCurrentlyPlayingSequenceItemId(item.id),
+            visualizerDelay
+          )
+        );
+        startTime += audio.buffer.duration;
+        if (index < sequence.length - 1) {
+          startTime += item.delayAfter / 1000;
         }
-      } else if (item.type === "delay") {
-        startTime += item.value / 1000;
       }
     });
+
+    const finalClearDelay =
+      (startTime - audioContextRef.current.currentTime) * 1000;
+    scheduledTimeoutsRef.current.push(
+      setTimeout(stopPlayback, finalClearDelay + 50)
+    );
   };
+
+  const currentlyPlayingSequenceItem = sequence.find(
+    (item) => item.id === currentlyPlayingSequenceItemId
+  );
+  const currentlyPlayingClip = currentlyPlayingSequenceItem
+    ? clips.find((c) => c.id === currentlyPlayingSequenceItem.audioId) || null
+    : null;
 
   return (
     <div className="space-y-6">
@@ -392,6 +496,7 @@ const SequenceTester = () => {
           <CardTitle>1. Upload Processed Clips</CardTitle>
         </CardHeader>
         <CardContent>
+          {/* THIS IS THE RESTORED SECTION */}
           <Dropzone onDrop={onDrop} accept={{ "audio/*": [] }}>
             {({ getRootProps, getInputProps }) => (
               <div
@@ -431,7 +536,12 @@ const SequenceTester = () => {
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>2. Build and Play Sequence</CardTitle>
             <Button onClick={playSequence}>
-              <Play className="mr-2 h-4 w-4" /> Play Full Sequence
+              {isPlaying ? (
+                <Square className="mr-2 h-4 w-4" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              {isPlaying ? "Stop" : "Play Sequence"}
             </Button>
           </CardHeader>
           <CardContent>
@@ -440,40 +550,42 @@ const SequenceTester = () => {
               collisionDetection={closestCenter}
               onDragEnd={handleDragEnd}
             >
-              <SortableContext
-                items={sequence.map((i) => i.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="space-y-2">
+              <div className="space-y-2">
+                <SortableContext
+                  items={sequence.map((i) => i.id)}
+                  strategy={verticalListSortingStrategy}
+                >
                   {sequence.map((item, index) => {
-                    if (item.type === "audio") {
-                      const clip = clips.find((c) => c.id === item.audioId);
-                      return (
+                    const clip = clips.find((c) => c.id === item.audioId);
+                    return (
+                      <React.Fragment key={item.id}>
                         <SortableAudioItem
-                          key={item.id}
-                          item={item}
+                          id={item.id}
                           clip={clip}
                           onRemove={() => removeFromSequence(item.id)}
+                          isPlaying={item.id === currentlyPlayingSequenceItemId}
                         />
-                      );
-                    }
-                    if (item.type === "delay") {
-                      return (
-                        <DelayControl
-                          key={item.id}
-                          value={item.value}
-                          onUpdate={(newValue) => updateDelay(index, newValue)}
-                        />
-                      );
-                    }
-                    return null;
+                        {index < sequence.length - 1 && (
+                          <DelayControl
+                            value={item.delayAfter}
+                            onUpdate={(newValue) =>
+                              updateDelay(item.id, newValue)
+                            }
+                          />
+                        )}
+                      </React.Fragment>
+                    );
                   })}
-                </div>
-              </SortableContext>
+                </SortableContext>
+              </div>
             </DndContext>
           </CardContent>
         </Card>
       )}
+      <PlaybackVisualizer
+        key={currentlyPlayingSequenceItemId}
+        clip={currentlyPlayingClip}
+      />
     </div>
   );
 };
