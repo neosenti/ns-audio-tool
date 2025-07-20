@@ -1,66 +1,77 @@
 // src/components/SequenceTester.tsx
 
-import { useState } from "react";
-import { type ProcessedAudio, type SequenceItem } from "@/lib/types";
+import { useState, useCallback } from "react";
+import Dropzone from "react-dropzone";
+import { type SequenceItem } from "@/lib/types"; // We will update types.ts
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Trash2, Play, PlusCircle } from "lucide-react";
 
-interface SequenceTesterProps {
-  availableAudios: ProcessedAudio[];
+// Local type for audio clips within this component
+interface TesterAudioClip {
+  id: string;
+  name: string;
+  buffer: AudioBuffer;
 }
 
-const SequenceTester = ({ availableAudios }: SequenceTesterProps) => {
+const SequenceTester = () => {
+  const [clips, setClips] = useState<TesterAudioClip[]>([]);
   const [sequence, setSequence] = useState<SequenceItem[]>([]);
-  const [selectedAudioId, setSelectedAudioId] = useState<string>("");
 
-  const addAudioToSequence = () => {
-    if (!selectedAudioId) {
-      alert("Please select an audio clip to add.");
-      return;
-    }
-    const newSequenceItem: SequenceItem = {
-      type: "audio",
-      audioId: selectedAudioId,
-      delayMs: 100, // Default delay
-    };
-    setSequence([...sequence, newSequenceItem]);
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    const audioContext = new AudioContext();
+    acceptedFiles.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        if (e.target?.result) {
+          try {
+            const buffer = await audioContext.decodeAudioData(
+              e.target.result as ArrayBuffer
+            );
+            const newClip: TesterAudioClip = {
+              id: `${file.name}-${Date.now()}`,
+              name: file.name,
+              buffer: buffer,
+            };
+            setClips((prev) => [...prev, newClip]);
+          } catch (error) {
+            console.error("Error decoding audio data:", error);
+            alert(`Could not process the file: ${file.name}`);
+          }
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }, []);
+
+  const addAudioToSequence = (audioId: string) => {
+    if (!audioId) return;
+    setSequence((prev) => [...prev, { type: "audio", audioId, delayMs: 100 }]);
   };
 
   const updateDelay = (index: number, delay: number) => {
-    const newSequence = [...sequence];
-    newSequence[index].delayMs = delay;
-    setSequence(newSequence);
+    setSequence((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, delayMs: delay } : item))
+    );
   };
 
   const removeFromSequence = (index: number) => {
-    const newSequence = [...sequence];
-    newSequence.splice(index, 1);
-    setSequence(newSequence);
+    setSequence((prev) => prev.filter((_, i) => i !== index));
   };
 
   const playSequence = () => {
-    const audioContext = new (window.AudioContext ||
-      window.webkitAudioContext)();
-    let startTime = audioContext.currentTime;
+    // This fixes the TypeScript error by using the standardized AudioContext
+    const audioContext = new AudioContext();
+    let startTime = audioContext.currentTime + 0.1; // Add a small buffer to ensure playback starts smoothly
 
     sequence.forEach((item) => {
-      const audio = availableAudios.find((a) => a.id === item.audioId);
+      const audio = clips.find((c) => c.id === item.audioId);
       if (audio) {
         const source = audioContext.createBufferSource();
         source.buffer = audio.buffer;
         source.connect(audioContext.destination);
         source.start(startTime);
-
-        // Update the start time for the next item in the sequence
         startTime += audio.buffer.duration + item.delayMs / 1000;
       }
     });
@@ -70,38 +81,36 @@ const SequenceTester = ({ availableAudios }: SequenceTesterProps) => {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Build Your Audio Sequence</CardTitle>
+          <CardTitle>1. Upload Your Processed Clips</CardTitle>
         </CardHeader>
         <CardContent>
-          {availableAudios.length === 0 ? (
-            <p className="text-muted-foreground">
-              Process an audio clip in the first tab to get started.
-            </p>
-          ) : (
-            <div className="flex items-end gap-2">
-              <div className="flex-grow">
-                <label htmlFor="audio-select" className="text-sm font-medium">
-                  Available Clips
-                </label>
-                <Select
-                  onValueChange={setSelectedAudioId}
-                  value={selectedAudioId}
-                >
-                  <SelectTrigger id="audio-select">
-                    <SelectValue placeholder="Select a processed audio clip" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableAudios.map((audio) => (
-                      <SelectItem key={audio.id} value={audio.id}>
-                        {audio.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          <Dropzone onDrop={onDrop} accept={{ "audio/*": [] }}>
+            {({ getRootProps, getInputProps }) => (
+              <div
+                {...getRootProps()}
+                className="flex items-center justify-center w-full p-10 border-2 border-dashed rounded-lg cursor-pointer border-muted hover:border-primary"
+              >
+                <input {...getInputProps()} />
+                <p>
+                  Drop your processed audio files here (you can select multiple)
+                </p>
               </div>
-              <Button onClick={addAudioToSequence}>
-                <PlusCircle className="mr-2 h-4 w-4" /> Add to Sequence
-              </Button>
+            )}
+          </Dropzone>
+          {clips.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <h3 className="font-semibold">Available Clips:</h3>
+              <div className="flex flex-wrap gap-2">
+                {clips.map((clip) => (
+                  <Button
+                    key={clip.id}
+                    variant="outline"
+                    onClick={() => addAudioToSequence(clip.id)}
+                  >
+                    <PlusCircle className="mr-2 h-4 w-4" /> Add "{clip.name}"
+                  </Button>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>
@@ -110,7 +119,7 @@ const SequenceTester = ({ availableAudios }: SequenceTesterProps) => {
       {sequence.length > 0 && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Current Sequence</CardTitle>
+            <CardTitle>2. Build and Play Sequence</CardTitle>
             <Button onClick={playSequence}>
               <Play className="mr-2 h-4 w-4" /> Play Full Sequence
             </Button>
@@ -118,9 +127,7 @@ const SequenceTester = ({ availableAudios }: SequenceTesterProps) => {
           <CardContent>
             <div className="space-y-4">
               {sequence.map((item, index) => {
-                const audio = availableAudios.find(
-                  (a) => a.id === item.audioId
-                );
+                const audio = clips.find((c) => c.id === item.audioId);
                 return (
                   <div
                     key={index}
@@ -141,7 +148,7 @@ const SequenceTester = ({ availableAudios }: SequenceTesterProps) => {
                         type="number"
                         value={item.delayMs}
                         onChange={(e) =>
-                          updateDelay(index, parseInt(e.target.value, 10))
+                          updateDelay(index, parseInt(e.target.value, 10) || 0)
                         }
                         className="w-24"
                       />
