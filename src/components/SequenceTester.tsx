@@ -266,8 +266,8 @@ const PlaybackVisualizer = ({ clip }: { clip: TesterAudioClip | null }) => {
       wavesurferRef.current = WaveSurfer.create({
         container: containerRef.current,
         height: 100,
-        waveColor: "hsl(var(--muted-foreground))",
-        progressColor: "hsl(var(--primary))",
+        waveColor: "black",
+        progressColor: "white",
         barWidth: 3,
         barRadius: 3,
         barGap: 2,
