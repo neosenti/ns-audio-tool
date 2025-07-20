@@ -1,4 +1,4 @@
-// src/components/AudioProcessor.tsx
+// src/components/AudioProcessor/AudioProcessor.tsx
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import WaveSurfer from "wavesurfer.js";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,20 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import Dropzone from "react-dropzone";
-import { Play, Pause, Download, Sparkles, Scissors } from "lucide-react";
+import {
+  Play,
+  Pause,
+  Download,
+  Sparkles,
+  Scissors,
+  Volume2,
+  Activity,
+} from "lucide-react";
+
+// Components
+import TrimAndPad from "./ProcessingSteps/TrimAndPad";
+import VolumeNorm from "./ProcessingSteps/VolumeNorm";
+import ProsodyViz from "./ProcessingSteps/ProsodyViz";
 
 // =================================================================================
 // Types
@@ -33,8 +46,21 @@ interface TrimPadSettings {
   fadeOutMs: number;
 }
 
+interface VolumeNormSettings {
+  enabled: boolean;
+  targetDb: number;
+}
+
+interface ProsodyVizSettings {
+  enabled: boolean;
+  showPitch: boolean;
+  showIntensity: boolean;
+}
+
 interface ProcessingSettings {
   trimAndPad: TrimPadSettings;
+  volumeNorm: VolumeNormSettings;
+  prosodyViz: ProsodyVizSettings;
 }
 
 // =================================================================================
@@ -166,12 +192,21 @@ const AudioProcessor = () => {
       fadeInMs: 10,
       fadeOutMs: 10,
     },
+    volumeNorm: {
+      enabled: false,
+      targetDb: -3,
+    },
+    prosodyViz: {
+      enabled: false,
+      showPitch: true,
+      showIntensity: true,
+    },
   });
   // Refs for debouncing and URL management
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const processedAudioUrlRef = useRef<string | null>(null);
   // State for accordion
-  const [accordionValue, setAccordionValue] = useState<string>("item-1");
+  const [accordionValue, setAccordionValue] = useState<string>("trim-pad");
 
   // Debounced processing function
   const runProcessingPipeline = useCallback(() => {
@@ -309,11 +344,20 @@ const AudioProcessor = () => {
 
   // Handle accordion changes
   useEffect(() => {
-    if (accordionValue === "item-1") {
-      // When accordion opens, ensure processing is enabled
+    if (accordionValue === "trim-pad") {
       setSettings((prev) => ({
         ...prev,
         trimAndPad: { ...prev.trimAndPad, enabled: true },
+      }));
+    } else if (accordionValue === "volume-norm") {
+      setSettings((prev) => ({
+        ...prev,
+        volumeNorm: { ...prev.volumeNorm, enabled: true },
+      }));
+    } else if (accordionValue === "prosody-viz") {
+      setSettings((prev) => ({
+        ...prev,
+        prosodyViz: { ...prev.prosodyViz, enabled: true },
       }));
     }
   }, [accordionValue]);
@@ -355,15 +399,16 @@ const AudioProcessor = () => {
   );
 
   const handleSettingsChange = (
-    newTrimPadSettings: Partial<TrimPadSettings>
+    step: keyof ProcessingSettings,
+    newSettings: any
   ) => {
     setSettings((prev) => ({
       ...prev,
-      trimAndPad: { ...prev.trimAndPad, ...newTrimPadSettings },
+      [step]: { ...prev[step], ...newSettings },
     }));
 
     // If disabling processing, close the accordion
-    if (newTrimPadSettings.enabled === false) {
+    if (newSettings.enabled === false) {
       setAccordionValue("");
     }
   };
@@ -381,8 +426,6 @@ const AudioProcessor = () => {
     a.remove();
     URL.revokeObjectURL(url);
   };
-
-  const trimPadSettings = settings.trimAndPad;
 
   return (
     <div className="space-y-6">
@@ -436,7 +479,8 @@ const AudioProcessor = () => {
                 onValueChange={setAccordionValue}
                 className="w-full"
               >
-                <AccordionItem value="item-1">
+                {/* Trim & Pad */}
+                <AccordionItem value="trim-pad">
                   <AccordionTrigger>
                     <div className="flex flex-1 items-center gap-4">
                       <Label
@@ -447,80 +491,87 @@ const AudioProcessor = () => {
                       </Label>
                       <Switch
                         id="trim-enable"
-                        checked={trimPadSettings.enabled}
+                        checked={settings.trimAndPad.enabled}
                         onCheckedChange={(checked) =>
-                          handleSettingsChange({ enabled: checked })
+                          handleSettingsChange("trimAndPad", {
+                            enabled: checked,
+                          })
                         }
                         className="ml-auto"
                       />
                     </div>
                   </AccordionTrigger>
-                  <AccordionContent className="space-y-6 pt-4">
-                    <fieldset
-                      disabled={!trimPadSettings.enabled}
-                      className="disabled:opacity-50 space-y-6"
-                    >
-                      <div className="space-y-2">
-                        <Label>
-                          Silence Threshold ({trimPadSettings.thresholdDb} dB)
-                        </Label>
-                        <Slider
-                          min={-60}
-                          max={0}
-                          step={1}
-                          value={[trimPadSettings.thresholdDb]}
-                          onValueChange={([val]) =>
-                            handleSettingsChange({ thresholdDb: val })
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Padding</Label>
-                        <Input
-                          type="number"
-                          value={trimPadSettings.paddingMs}
-                          onChange={(e) =>
-                            handleSettingsChange({
-                              paddingMs: parseInt(e.target.value) || 0,
-                            })
-                          }
-                        />
-                        <p className="text-sm text-muted-foreground">
-                          Milliseconds before and after audio.
-                        </p>
-                      </div>
-                      <div className="pt-4 border-t">
-                        <Label>Popping Reduction (Micro-Fades)</Label>
-                        <div className="grid grid-cols-2 gap-4 mt-2">
-                          <div className="space-y-2">
-                            <Label htmlFor="fade-in">Fade-In (ms)</Label>
-                            <Input
-                              id="fade-in"
-                              type="number"
-                              value={trimPadSettings.fadeInMs}
-                              onChange={(e) =>
-                                handleSettingsChange({
-                                  fadeInMs: parseInt(e.target.value) || 0,
-                                })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="fade-out">Fade-Out (ms)</Label>
-                            <Input
-                              id="fade-out"
-                              type="number"
-                              value={trimPadSettings.fadeOutMs}
-                              onChange={(e) =>
-                                handleSettingsChange({
-                                  fadeOutMs: parseInt(e.target.value) || 0,
-                                })
-                              }
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </fieldset>
+                  <AccordionContent>
+                    <TrimAndPad
+                      settings={settings.trimAndPad}
+                      onSettingsChange={(newSettings) =>
+                        handleSettingsChange("trimAndPad", newSettings)
+                      }
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+
+                {/* Volume Normalization */}
+                <AccordionItem value="volume-norm">
+                  <AccordionTrigger>
+                    <div className="flex flex-1 items-center gap-4">
+                      <Label
+                        htmlFor="volume-enable"
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
+                        <Volume2 className="h-5 w-5" /> Volume Normalization
+                      </Label>
+                      <Switch
+                        id="volume-enable"
+                        checked={settings.volumeNorm.enabled}
+                        onCheckedChange={(checked) =>
+                          handleSettingsChange("volumeNorm", {
+                            enabled: checked,
+                          })
+                        }
+                        className="ml-auto"
+                      />
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <VolumeNorm
+                      settings={settings.volumeNorm}
+                      onSettingsChange={(newSettings) =>
+                        handleSettingsChange("volumeNorm", newSettings)
+                      }
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+
+                {/* Prosody Visualization */}
+                <AccordionItem value="prosody-viz">
+                  <AccordionTrigger>
+                    <div className="flex flex-1 items-center gap-4">
+                      <Label
+                        htmlFor="prosody-enable"
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
+                        <Activity className="h-5 w-5" /> Prosody Visualization
+                      </Label>
+                      <Switch
+                        id="prosody-enable"
+                        checked={settings.prosodyViz.enabled}
+                        onCheckedChange={(checked) =>
+                          handleSettingsChange("prosodyViz", {
+                            enabled: checked,
+                          })
+                        }
+                        className="ml-auto"
+                      />
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <ProsodyViz
+                      settings={settings.prosodyViz}
+                      onSettingsChange={(newSettings) =>
+                        handleSettingsChange("prosodyViz", newSettings)
+                      }
+                    />
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
@@ -535,28 +586,34 @@ const AudioProcessor = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {isProcessing ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Sparkles className="h-4 w-4 animate-spin" />
-                  Processing...
-                </div>
-              ) : processedAudioUrl ? (
-                <>
-                  <WaveformDisplay
-                    key={processedAudioUrl}
-                    audioUrl={processedAudioUrl}
-                    title="Processed Audio"
-                  />
-                  <Button onClick={handleDownload} size="lg">
-                    <Download className="mr-2 h-4 w-4" /> Download Processed
-                    Audio
-                  </Button>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Processed audio will appear here.
-                </p>
-              )}
+              <div className="relative">
+                {isProcessing && (
+                  <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Sparkles className="h-4 w-4 animate-spin" />
+                      Processing...
+                    </div>
+                  </div>
+                )}
+
+                {processedAudioUrl ? (
+                  <>
+                    <WaveformDisplay
+                      key={processedAudioUrl}
+                      audioUrl={processedAudioUrl}
+                      title="Processed Audio"
+                    />
+                    <Button onClick={handleDownload} size="lg">
+                      <Download className="mr-2 h-4 w-4" /> Download Processed
+                      Audio
+                    </Button>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Processed audio will appear here.
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
         </>
