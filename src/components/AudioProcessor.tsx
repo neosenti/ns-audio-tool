@@ -1,90 +1,105 @@
+// src/components/AudioProcessor.tsx
+
+// (Keep all the imports from the previous step)
 import { useState, useRef, useCallback } from "react";
 import { useWavesurfer } from "@wavesurfer/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Dropzone from "react-dropzone";
-import { Play, Pause, Scissors, Sparkles } from "lucide-react";
+import { Play, Pause, Sparkles } from "lucide-react";
+import { type ProcessedAudio } from "@/lib/types";
 
-const AudioProcessor = () => {
+// The props interface defines the function we expect from the parent
+interface AudioProcessorProps {
+  onAudioProcessed: (audio: ProcessedAudio) => void;
+}
+
+const AudioProcessor = ({ onAudioProcessed }: AudioProcessorProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [originalBuffer, setOriginalBuffer] = useState<AudioBuffer | null>(
-    null
-  );
+  const [audioFile, setAudioFile] = useState<File | null>(null);
 
-  // Wavesurfer hook to manage the audio player instance
-  const { wavesurfer, isPlaying, currentTime } = useWavesurfer({
+  const { wavesurfer, isPlaying } = useWavesurfer({
     container: containerRef,
     height: 120,
     waveColor: "hsl(var(--muted-foreground))",
     progressColor: "hsl(var(--primary))",
-    url: audioUrl || undefined,
+    url: audioFile ? URL.createObjectURL(audioFile) : undefined,
     barWidth: 3,
     barRadius: 3,
     barGap: 2,
   });
 
-  // Callback for when a file is dropped
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles[0]) {
-      const url = URL.createObjectURL(acceptedFiles[0]);
-      setAudioUrl(url);
+      setAudioFile(acceptedFiles[0]);
     }
   }, []);
 
-  // Handle play/pause functionality
   const handlePlayPause = () => {
-    wavesurfer && wavesurfer.playPause();
+    wavesurfer?.playPause();
   };
 
-  // Placeholder for the processing logic
-  const handleProcessAudio = () => {
-    if (!wavesurfer) return;
+  // This is a placeholder for your actual silence detection and padding logic
+  const handleProcessAudio = async () => {
+    if (!wavesurfer || !audioFile) return;
 
-    // In a future step, we'll get the buffer from wavesurfer
-    const buffer = wavesurfer.getDecodedData();
-    if (!buffer) {
-      alert("Audio has not been decoded yet. Please wait.");
+    const originalBuffer = wavesurfer.getDecodedData();
+    if (!originalBuffer) {
+      alert("Audio not ready yet.");
       return;
     }
 
-    console.log("Processing audio buffer:", buffer);
-    alert("Silence detection and padding logic will be implemented here!");
-    // 1. Detect silence
-    // 2. Slice the audio
-    // 3. Add padding
-    // 4. Create a new buffer and load it into a new wavesurfer instance
+    // --- YOUR PROCESSING LOGIC GOES HERE ---
+    // For now, we'll just simulate processing by cloning the buffer
+    // and adding a 100ms pad on each side.
+    const audioContext = new AudioContext();
+    const paddingSeconds = 0.1; // 100ms
+    const newBuffer = audioContext.createBuffer(
+      originalBuffer.numberOfChannels,
+      originalBuffer.length + 2 * (paddingSeconds * originalBuffer.sampleRate),
+      originalBuffer.sampleRate
+    );
+
+    for (let i = 0; i < originalBuffer.numberOfChannels; i++) {
+      const channel = newBuffer.getChannelData(i);
+      const originalChannel = originalBuffer.getChannelData(i);
+      // Copy original data into the middle of the new buffer
+      channel.set(originalChannel, paddingSeconds * originalBuffer.sampleRate);
+    }
+    // --- END OF PROCESSING LOGIC ---
+
+    // Create a unique ID and name for the processed audio
+    const newProcessedAudio: ProcessedAudio = {
+      id: `processed-${Date.now()}`,
+      name: `${audioFile.name.split(".").slice(0, -1).join(".")}-padded`,
+      buffer: newBuffer,
+    };
+
+    // Call the function passed from the parent to update the shared state
+    onAudioProcessed(newProcessedAudio);
   };
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>1. Upload Audio</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Dropzone onDrop={onDrop} accept={{ "audio/*": [] }}>
-            {({ getRootProps, getInputProps }) => (
-              <div
-                {...getRootProps()}
-                className="flex items-center justify-center w-full p-10 border-2 border-dashed rounded-lg cursor-pointer border-muted hover:border-primary transition-colors"
-              >
-                <input {...getInputProps()} />
-                <p className="text-muted-foreground">
-                  Drag & drop an audio file here, or click to select a file
-                </p>
-              </div>
-            )}
-          </Dropzone>
-        </CardContent>
-      </Card>
+    // The JSX remains largely the same as the previous version
+    <Card>
+      <CardHeader>
+        <CardTitle>Upload & Process Audio</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Dropzone onDrop={onDrop} accept={{ "audio/*": [] }}>
+          {({ getRootProps, getInputProps }) => (
+            <div
+              {...getRootProps()}
+              className="flex items-center justify-center w-full p-10 border-2 border-dashed rounded-lg cursor-pointer border-muted hover:border-primary transition-colors"
+            >
+              <input {...getInputProps()} />
+              <p>Drop an audio file here</p>
+            </div>
+          )}
+        </Dropzone>
 
-      {audioUrl && (
-        <Card>
-          <CardHeader>
-            <CardTitle>2. Review and Process</CardTitle>
-          </CardHeader>
-          <CardContent>
+        {audioFile && (
+          <div className="mt-4">
             <div ref={containerRef} className="w-full mb-4" />
             <div className="flex items-center gap-4">
               <Button onClick={handlePlayPause} variant="outline" size="icon">
@@ -94,20 +109,14 @@ const AudioProcessor = () => {
                   <Play className="h-4 w-4" />
                 )}
               </Button>
-              <div className="flex-grow">
-                <p className="text-sm text-muted-foreground">
-                  Current Time: {currentTime.toFixed(2)}s
-                </p>
-              </div>
               <Button onClick={handleProcessAudio}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Pad Audio
+                <Sparkles className="mr-2 h-4 w-4" /> Process & Pad Audio
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 };
 
