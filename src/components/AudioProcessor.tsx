@@ -9,25 +9,14 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
 import Dropzone from "react-dropzone";
 import {
   Play,
   Pause,
   Download,
   Sparkles,
-  Scissors,
-  Volume2,
-  Activity,
+  FolderUp,
+  FolderDown,
 } from "lucide-react";
 
 // Components
@@ -193,7 +182,7 @@ const AudioProcessor = () => {
       fadeOutMs: 10,
     },
     volumeNorm: {
-      enabled: false,
+      enabled: true,
       targetDb: -3,
     },
     prosodyViz: {
@@ -205,8 +194,7 @@ const AudioProcessor = () => {
   // Refs for debouncing and URL management
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const processedAudioUrlRef = useRef<string | null>(null);
-  // State for accordion
-  const [accordionValue, setAccordionValue] = useState<string>("trim-pad");
+  const settingsFileInputRef = useRef<HTMLInputElement>(null);
 
   // Debounced processing function
   const runProcessingPipeline = useCallback(() => {
@@ -224,7 +212,7 @@ const AudioProcessor = () => {
       try {
         let bufferToProcess = originalAudioBuffer.current!;
 
-        // Only process if enabled
+        // Trim & Pad Processing
         if (settings.trimAndPad.enabled) {
           const { thresholdDb, paddingMs, fadeInMs, fadeOutMs } =
             settings.trimAndPad;
@@ -305,6 +293,45 @@ const AudioProcessor = () => {
           }
         }
 
+        // Volume Normalization Processing
+        if (settings.volumeNorm.enabled) {
+          const targetAmplitude = Math.pow(
+            10,
+            settings.volumeNorm.targetDb / 20
+          );
+
+          // Find the current peak amplitude
+          let peak = 0;
+          for (
+            let channel = 0;
+            channel < bufferToProcess.numberOfChannels;
+            channel++
+          ) {
+            const channelData = bufferToProcess.getChannelData(channel);
+            for (let i = 0; i < channelData.length; i++) {
+              const amplitude = Math.abs(channelData[i]);
+              if (amplitude > peak) peak = amplitude;
+            }
+          }
+
+          // Calculate gain needed to reach target amplitude
+          if (peak > 0) {
+            const gain = targetAmplitude / peak;
+
+            // Apply gain to all channels
+            for (
+              let channel = 0;
+              channel < bufferToProcess.numberOfChannels;
+              channel++
+            ) {
+              const channelData = bufferToProcess.getChannelData(channel);
+              for (let i = 0; i < channelData.length; i++) {
+                channelData[i] *= gain;
+              }
+            }
+          }
+        }
+
         const finalBlob = bufferToWave(bufferToProcess);
         setProcessedAudioBlob(finalBlob);
 
@@ -341,26 +368,6 @@ const AudioProcessor = () => {
       }
     };
   }, []);
-
-  // Handle accordion changes
-  useEffect(() => {
-    if (accordionValue === "trim-pad") {
-      setSettings((prev) => ({
-        ...prev,
-        trimAndPad: { ...prev.trimAndPad, enabled: true },
-      }));
-    } else if (accordionValue === "volume-norm") {
-      setSettings((prev) => ({
-        ...prev,
-        volumeNorm: { ...prev.volumeNorm, enabled: true },
-      }));
-    } else if (accordionValue === "prosody-viz") {
-      setSettings((prev) => ({
-        ...prev,
-        prosodyViz: { ...prev.prosodyViz, enabled: true },
-      }));
-    }
-  }, [accordionValue]);
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -406,11 +413,6 @@ const AudioProcessor = () => {
       ...prev,
       [step]: { ...prev[step], ...newSettings },
     }));
-
-    // If disabling processing, close the accordion
-    if (newSettings.enabled === false) {
-      setAccordionValue("");
-    }
   };
 
   const handleDownload = () => {
@@ -427,14 +429,54 @@ const AudioProcessor = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Export settings to JSON file
+  const exportSettings = () => {
+    const settingsStr = JSON.stringify(settings, null, 2);
+    const blob = new Blob([settingsStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "audio-processor-settings.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // Import settings from JSON file
+  const importSettings = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importedSettings = JSON.parse(e.target?.result as string);
+        setSettings(importedSettings);
+      } catch (error) {
+        console.error("Error importing settings:", error);
+        alert("Invalid settings file format");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSettingsFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      importSettings(file);
+    }
+    // Reset input to allow selecting same file again
+    if (e.target) e.target.value = "";
+  };
+
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>1. Upload Audio</CardTitle>
-          <CardDescription>Drop an audio file to begin.</CardDescription>
+          <CardDescription>
+            Drop an audio file to begin processing.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <Dropzone onDrop={onDrop} accept={{ "audio/*": [] }} multiple={false}>
             {({ getRootProps, getInputProps }) => (
               <div
@@ -446,6 +488,31 @@ const AudioProcessor = () => {
               </div>
             )}
           </Dropzone>
+
+          <div className="flex gap-3 pt-4">
+            <Button
+              variant="outline"
+              onClick={exportSettings}
+              className="flex-1"
+            >
+              <FolderUp className="mr-2 h-4 w-4" /> Export Settings
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => settingsFileInputRef.current?.click()}
+              className="flex-1"
+            >
+              <FolderDown className="mr-2 h-4 w-4" /> Import Settings
+            </Button>
+            <input
+              type="file"
+              ref={settingsFileInputRef}
+              onChange={handleSettingsFileChange}
+              accept=".json"
+              className="hidden"
+            />
+          </div>
         </CardContent>
       </Card>
 
@@ -464,119 +531,35 @@ const AudioProcessor = () => {
             </CardContent>
           </Card>
 
-          <Card>
+          <div className="space-y-4">
             <CardHeader>
               <CardTitle>3. Processing Steps</CardTitle>
               <CardDescription>
-                Adjust settings to automatically re-process the audio.
+                Enable and configure processing steps
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Accordion
-                type="single"
-                collapsible
-                value={accordionValue}
-                onValueChange={setAccordionValue}
-                className="w-full"
-              >
-                {/* Trim & Pad */}
-                <AccordionItem value="trim-pad">
-                  <AccordionTrigger>
-                    <div className="flex flex-1 items-center gap-4">
-                      <Label
-                        htmlFor="trim-enable"
-                        className="flex items-center gap-2 cursor-pointer"
-                      >
-                        <Scissors className="h-5 w-5" /> Auto-Trim & Pad
-                      </Label>
-                      <Switch
-                        id="trim-enable"
-                        checked={settings.trimAndPad.enabled}
-                        onCheckedChange={(checked) =>
-                          handleSettingsChange("trimAndPad", {
-                            enabled: checked,
-                          })
-                        }
-                        className="ml-auto"
-                      />
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <TrimAndPad
-                      settings={settings.trimAndPad}
-                      onSettingsChange={(newSettings) =>
-                        handleSettingsChange("trimAndPad", newSettings)
-                      }
-                    />
-                  </AccordionContent>
-                </AccordionItem>
 
-                {/* Volume Normalization */}
-                <AccordionItem value="volume-norm">
-                  <AccordionTrigger>
-                    <div className="flex flex-1 items-center gap-4">
-                      <Label
-                        htmlFor="volume-enable"
-                        className="flex items-center gap-2 cursor-pointer"
-                      >
-                        <Volume2 className="h-5 w-5" /> Volume Normalization
-                      </Label>
-                      <Switch
-                        id="volume-enable"
-                        checked={settings.volumeNorm.enabled}
-                        onCheckedChange={(checked) =>
-                          handleSettingsChange("volumeNorm", {
-                            enabled: checked,
-                          })
-                        }
-                        className="ml-auto"
-                      />
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <VolumeNorm
-                      settings={settings.volumeNorm}
-                      onSettingsChange={(newSettings) =>
-                        handleSettingsChange("volumeNorm", newSettings)
-                      }
-                    />
-                  </AccordionContent>
-                </AccordionItem>
+            <TrimAndPad
+              settings={settings.trimAndPad}
+              onSettingsChange={(newSettings) =>
+                handleSettingsChange("trimAndPad", newSettings)
+              }
+            />
 
-                {/* Prosody Visualization */}
-                <AccordionItem value="prosody-viz">
-                  <AccordionTrigger>
-                    <div className="flex flex-1 items-center gap-4">
-                      <Label
-                        htmlFor="prosody-enable"
-                        className="flex items-center gap-2 cursor-pointer"
-                      >
-                        <Activity className="h-5 w-5" /> Prosody Visualization
-                      </Label>
-                      <Switch
-                        id="prosody-enable"
-                        checked={settings.prosodyViz.enabled}
-                        onCheckedChange={(checked) =>
-                          handleSettingsChange("prosodyViz", {
-                            enabled: checked,
-                          })
-                        }
-                        className="ml-auto"
-                      />
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <ProsodyViz
-                      settings={settings.prosodyViz}
-                      onSettingsChange={(newSettings) =>
-                        handleSettingsChange("prosodyViz", newSettings)
-                      }
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </CardContent>
-          </Card>
+            <VolumeNorm
+              settings={settings.volumeNorm}
+              onSettingsChange={(newSettings) =>
+                handleSettingsChange("volumeNorm", newSettings)
+              }
+            />
+
+            <ProsodyViz
+              settings={settings.prosodyViz}
+              onSettingsChange={(newSettings) =>
+                handleSettingsChange("prosodyViz", newSettings)
+              }
+            />
+          </div>
 
           <Card>
             <CardHeader>
@@ -603,7 +586,7 @@ const AudioProcessor = () => {
                       audioUrl={processedAudioUrl}
                       title="Processed Audio"
                     />
-                    <Button onClick={handleDownload} size="lg">
+                    <Button onClick={handleDownload} size="lg" className="mt-4">
                       <Download className="mr-2 h-4 w-4" /> Download Processed
                       Audio
                     </Button>

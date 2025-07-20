@@ -1,9 +1,10 @@
 // src/components/AudioProcessor/ProcessingSteps/ProsodyViz.tsx
 import React from "react";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Activity } from "lucide-react";
 
 interface ProsodyVizSettings {
   enabled: boolean;
@@ -21,36 +22,55 @@ const ProsodyViz: React.FC<ProsodyVizProps> = ({
   onSettingsChange,
 }) => {
   return (
-    <div className="space-y-6 pt-4">
-      <div className="space-y-4">
-        <div className="flex items-center space-x-2">
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            <span>Prosody Visualization</span>
+          </div>
           <Switch
-            id="pitch-viz"
-            checked={settings.showPitch}
+            checked={settings.enabled}
             onCheckedChange={(checked) =>
-              onSettingsChange({ showPitch: checked })
+              onSettingsChange({ enabled: checked })
             }
           />
-          <Label htmlFor="pitch-viz">Show Pitch Contour</Label>
-        </div>
-        <div className="flex items-center space-x-2">
-          <Switch
-            id="intensity-viz"
-            checked={settings.showIntensity}
-            onCheckedChange={(checked) =>
-              onSettingsChange({ showIntensity: checked })
-            }
-          />
-          <Label htmlFor="intensity-viz">Show Intensity</Label>
-        </div>
-      </div>
+        </CardTitle>
+      </CardHeader>
 
-      <div className="pt-4">
-        <Button variant="outline" size="sm">
-          Analyze Prosody
-        </Button>
-      </div>
-    </div>
+      {settings.enabled && (
+        <CardContent className="space-y-4 pt-2">
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="pitch-viz"
+                checked={settings.showPitch}
+                onCheckedChange={(checked) =>
+                  onSettingsChange({ showPitch: checked })
+                }
+              />
+              <Label htmlFor="pitch-viz">Show Pitch Contour</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="intensity-viz"
+                checked={settings.showIntensity}
+                onCheckedChange={(checked) =>
+                  onSettingsChange({ showIntensity: checked })
+                }
+              />
+              <Label htmlFor="intensity-viz">Show Intensity</Label>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <Button variant="outline" size="sm">
+              Analyze Prosody
+            </Button>
+          </div>
+        </CardContent>
+      )}
+    </Card>
   );
 };
 
