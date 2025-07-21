@@ -140,17 +140,10 @@ const SortableAudioItem = ({
   isPlaying: boolean;
   onRemove: () => void;
 }) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useSortable({ id });
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition: isDragging ? "none" : "transform 0.25s ease",
     zIndex: isDragging ? 10 : "auto",
   };
 

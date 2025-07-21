@@ -15,8 +15,8 @@ import {
   Pause,
   Download,
   Sparkles,
+  Import,
   FolderUp,
-  FolderDown,
 } from "lucide-react";
 
 // Components
@@ -42,8 +42,6 @@ interface VolumeNormSettings {
 
 interface ProsodyVizSettings {
   enabled: boolean;
-  showPitch: boolean;
-  showIntensity: boolean;
 }
 
 interface ProcessingSettings {
@@ -187,14 +185,17 @@ const AudioProcessor = () => {
     },
     prosodyViz: {
       enabled: false,
-      showPitch: true,
-      showIntensity: true,
     },
   });
   // Refs for debouncing and URL management
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const processedAudioUrlRef = useRef<string | null>(null);
   const settingsFileInputRef = useRef<HTMLInputElement>(null);
+  const [prosodyData, setProsodyData] = useState<{
+    pitch: number[];
+    intensity: number[];
+    voiced: boolean[];
+  } | null>(null);
 
   // Debounced processing function
   const runProcessingPipeline = useCallback(() => {
@@ -383,6 +384,7 @@ const AudioProcessor = () => {
       setOriginalAudioUrl(URL.createObjectURL(file));
       setProcessedAudioUrl(null);
       setProcessedAudioBlob(null);
+      setProsodyData(null);
 
       const reader = new FileReader();
       reader.onload = async (e) => {
@@ -467,6 +469,14 @@ const AudioProcessor = () => {
     if (e.target) e.target.value = "";
   };
 
+  const handleProsodyAnalysisComplete = (data: {
+    pitch: number[];
+    intensity: number[];
+    voiced: boolean[];
+  }) => {
+    setProsodyData(data);
+  };
+
   return (
     <div className="space-y-6">
       <Card>
@@ -503,7 +513,7 @@ const AudioProcessor = () => {
               onClick={() => settingsFileInputRef.current?.click()}
               className="flex-1"
             >
-              <FolderDown className="mr-2 h-4 w-4" /> Import Settings
+              <Import className="mr-2 h-4 w-4" /> Import Settings
             </Button>
             <input
               type="file"
@@ -554,10 +564,9 @@ const AudioProcessor = () => {
             />
 
             <ProsodyViz
-              settings={settings.prosodyViz}
-              onSettingsChange={(newSettings) =>
-                handleSettingsChange("prosodyViz", newSettings)
-              }
+              audioBuffer={originalAudioBuffer.current}
+              onAnalysisComplete={handleProsodyAnalysisComplete}
+              analysisData={prosodyData}
             />
           </div>
 
