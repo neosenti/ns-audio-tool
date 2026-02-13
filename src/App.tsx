@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AudioProcessor from "./components/AudioProcessor";
 import SequenceTester from "./components/SequenceTester";
+import AudioSplitter from "./components/AudioSplitter"; // Import the new component
 
 function App() {
   return (
@@ -15,16 +16,21 @@ function App() {
               Voice Actor Audio Tool
             </h1>
             <p className="text-muted-foreground">
-              Process your voice clips and test them in sequence.
+              Slice, process, and test your voice clips.
             </p>
           </div>
         </header>
         <main className="container mx-auto p-4">
-          <Tabs defaultValue="processor" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="processor">1. Audio Processor</TabsTrigger>
-              <TabsTrigger value="tester">2. Sequence Tester</TabsTrigger>
+          <Tabs defaultValue="splitter" className="w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="splitter">1. Audio Splitter</TabsTrigger>
+              <TabsTrigger value="processor">2. Audio Processor</TabsTrigger>
+              <TabsTrigger value="tester">3. Sequence Tester</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="splitter" className="mt-4">
+              <AudioSplitter />
+            </TabsContent>
 
             <TabsContent value="processor" className="mt-4">
               <AudioProcessor />
