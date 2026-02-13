@@ -23,27 +23,15 @@ import localforage from "localforage";
 import WaveSurfer from "wavesurfer.js";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
+import { Input } from "@/components/ui/input";
 import {
   Trash2,
   Play,
   PlusCircle,
   GripVertical,
-  ChevronsUpDown,
   Square,
-  Check,
+  ArrowDown,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -73,10 +61,6 @@ interface StoredClipData {
 // =================================================================================
 const CLIPS_STORAGE_KEY = "audio_tool_clips_v3";
 const SEQUENCE_STORAGE_KEY = "audio_tool_sequence_v3";
-const delayOptions = [500, 250, 100, 50, 0, -50, -100, -250, -500].map((v) => ({
-  value: v.toString(),
-  label: `${v} ms`,
-}));
 
 // =================================================================================
 // Helper Function
@@ -152,25 +136,36 @@ const SortableAudioItem = ({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "flex items-center gap-2 p-2 bg-background border rounded-lg touch-none relative",
-        isPlaying && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+        "flex items-center gap-2 p-2 bg-background border rounded-lg touch-none relative transition-all",
+        isPlaying &&
+          "ring-2 ring-primary ring-offset-2 ring-offset-background border-primary",
+        isDragging && "opacity-50",
       )}
     >
-      <button {...attributes} {...listeners} className="cursor-grab p-1">
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab p-1 hover:bg-muted rounded"
+      >
         <GripVertical className="h-5 w-5 text-muted-foreground" />
       </button>
-      <div className="flex-grow font-semibold">
+      <div className="flex-grow font-medium truncate">
         {clip?.name || "Audio not found"}
       </div>
-      <Button variant="ghost" size="icon" onClick={onRemove}>
-        <Trash2 className="h-4 w-4 text-destructive" />
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onRemove}
+        className="text-muted-foreground hover:text-destructive"
+      >
+        <X className="h-4 w-4" />
       </Button>
     </div>
   );
 };
 
 // =================================================================================
-// Delay Control Component
+// Delay Control Component (Updated)
 // =================================================================================
 const DelayControl = ({
   value,
@@ -179,71 +174,47 @@ const DelayControl = ({
   value: number;
   onUpdate: (newValue: number) => void;
 }) => {
-  const [open, setOpen] = useState(false);
-  const [inputValue, setInputValue] = useState(value.toString());
+  const [localValue, setLocalValue] = useState(value.toString());
+
+  // Sync with prop changes
   useEffect(() => {
-    setInputValue(value.toString());
+    setLocalValue(value.toString());
   }, [value]);
-  const handleSelect = (currentValue: string) => {
-    onUpdate(Number(currentValue));
-    setOpen(false);
-  };
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      const num = parseInt(inputValue, 10);
-      if (!isNaN(num)) {
-        onUpdate(num);
-        setOpen(false);
-        e.currentTarget.blur();
-      }
+
+  const commitChange = () => {
+    const num = parseInt(localValue, 10);
+    if (!isNaN(num)) {
+      onUpdate(num);
+      setLocalValue(num.toString());
+    } else {
+      setLocalValue(value.toString()); // Revert if invalid
     }
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    }
+  };
+
   return (
-    <div className="flex justify-center items-center my-1">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            className="w-[150px] justify-between"
-          >
-            {value} ms
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[200px] p-0">
-          <Command>
-            <CommandInput
-              placeholder="Set custom delay..."
-              value={inputValue}
-              onValueChange={setInputValue}
-              onKeyDown={handleKeyDown}
-            />
-            <CommandList>
-              <CommandEmpty>No results.</CommandEmpty>
-              <CommandGroup>
-                {delayOptions.map((option) => (
-                  <CommandItem
-                    key={option.value}
-                    value={option.value}
-                    onSelect={handleSelect}
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        value.toString() === option.value
-                          ? "opacity-100"
-                          : "opacity-0"
-                      )}
-                    />
-                    {option.label}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
+    <div className="flex flex-col items-center justify-center py-2 gap-1">
+      <div className="h-3 w-px bg-border"></div>
+      <div className="relative flex items-center">
+        <Input
+          type="number"
+          className="w-24 h-8 text-center pr-8 text-xs font-mono"
+          value={localValue}
+          onChange={(e) => setLocalValue(e.target.value)}
+          onBlur={commitChange}
+          onKeyDown={handleKeyDown}
+        />
+        <span className="absolute right-3 text-[10px] text-muted-foreground pointer-events-none select-none">
+          ms
+        </span>
+      </div>
+      <div className="h-3 w-px bg-border"></div>
+      <ArrowDown className="h-3 w-3 text-muted-foreground/50" />
     </div>
   );
 };
@@ -309,23 +280,24 @@ const SequenceTester = () => {
 
   const sensors = useSensors(
     useSensor(PointerSensor),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   useEffect(() => {
     localforage.config({ name: "audioTool" });
     async function loadClips() {
       setIsLoading(true);
-      const savedClipsData = await localforage.getItem<StoredClipData[]>(
-        CLIPS_STORAGE_KEY
-      );
+      const savedClipsData =
+        await localforage.getItem<StoredClipData[]>(CLIPS_STORAGE_KEY);
       if (savedClipsData) {
         const audioContext = new AudioContext();
         const loadedClips: TesterAudioClip[] = [];
         for (const clipData of savedClipsData) {
           try {
             const buffer = await audioContext.decodeAudioData(
-              clipData.data.slice(0)
+              clipData.data.slice(0),
             );
             loadedClips.push({ id: clipData.id, name: clipData.name, buffer });
           } catch (e) {
@@ -355,7 +327,7 @@ const SequenceTester = () => {
                 const arrayBuffer = e.target.result as ArrayBuffer;
                 try {
                   const buffer = await audioContext.decodeAudioData(
-                    arrayBuffer.slice(0)
+                    arrayBuffer.slice(0),
                   );
                   const newClip = {
                     id: `${file.name}-${Date.now()}`,
@@ -377,8 +349,8 @@ const SequenceTester = () => {
             };
             reader.onerror = reject;
             reader.readAsArrayBuffer(file);
-          }
-        )
+          },
+        ),
     );
     try {
       const results = await Promise.all(newClipsPromises);
@@ -407,11 +379,26 @@ const SequenceTester = () => {
     setSequence((prev) => prev.filter((item) => item.id !== idToRemove));
   };
 
+  // Remove clip from available list AND local storage
+  const deleteAvailableClip = async (clipId: string) => {
+    // 1. Remove from state
+    setClips((prev) => prev.filter((c) => c.id !== clipId));
+
+    // 2. Remove from storage
+    const currentSaved =
+      (await localforage.getItem<StoredClipData[]>(CLIPS_STORAGE_KEY)) || [];
+    const newSaved = currentSaved.filter((c) => c.id !== clipId);
+    await localforage.setItem(CLIPS_STORAGE_KEY, newSaved);
+
+    // 3. Remove from current sequence if present
+    setSequence((prev) => prev.filter((item) => item.audioId !== clipId));
+  };
+
   const updateDelay = (idToUpdate: string, delay: number) => {
     setSequence((prev) =>
       prev.map((item) =>
-        item.id === idToUpdate ? { ...item, delayAfter: delay } : item
-      )
+        item.id === idToUpdate ? { ...item, delayAfter: delay } : item,
+      ),
     );
   };
 
@@ -458,8 +445,8 @@ const SequenceTester = () => {
         scheduledTimeoutsRef.current.push(
           setTimeout(
             () => setCurrentlyPlayingSequenceItemId(item.id),
-            visualizerDelay
-          )
+            visualizerDelay,
+          ),
         );
         startTime += audio.buffer.duration;
         if (index < sequence.length - 1) {
@@ -471,12 +458,12 @@ const SequenceTester = () => {
     const finalClearDelay =
       (startTime - audioContextRef.current.currentTime) * 1000;
     scheduledTimeoutsRef.current.push(
-      setTimeout(stopPlayback, finalClearDelay + 50)
+      setTimeout(stopPlayback, finalClearDelay + 50),
     );
   };
 
   const currentlyPlayingSequenceItem = sequence.find(
-    (item) => item.id === currentlyPlayingSequenceItemId
+    (item) => item.id === currentlyPlayingSequenceItemId,
   );
   const currentlyPlayingClip = currentlyPlayingSequenceItem
     ? clips.find((c) => c.id === currentlyPlayingSequenceItem.audioId) || null
@@ -489,12 +476,11 @@ const SequenceTester = () => {
           <CardTitle>1. Upload Processed Clips</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* THIS IS THE RESTORED SECTION */}
           <Dropzone onDrop={onDrop} accept={{ "audio/*": [] }}>
             {({ getRootProps, getInputProps }) => (
               <div
                 {...getRootProps()}
-                className="flex items-center justify-center w-full p-10 border-2 border-dashed rounded-lg cursor-pointer border-muted hover:border-primary"
+                className="flex items-center justify-center w-full p-10 border-2 border-dashed rounded-lg cursor-pointer border-muted hover:border-primary transition-colors"
               >
                 <input {...getInputProps()} />
                 <p>Drop your processed audio files here</p>
@@ -506,16 +492,34 @@ const SequenceTester = () => {
           ) : (
             clips.length > 0 && (
               <div className="mt-4 space-y-2">
-                <h3 className="font-semibold">Available Clips:</h3>
+                <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">
+                  Available Clips
+                </h3>
                 <div className="flex flex-wrap gap-2">
                   {clips.map((clip) => (
-                    <Button
+                    <div
                       key={clip.id}
-                      variant="outline"
-                      onClick={() => addAudioToSequence(clip)}
+                      className="flex items-center group bg-muted/50 rounded-md border pl-1 pr-1 py-1"
                     >
-                      <PlusCircle className="mr-2 h-4 w-4" /> Add "{clip.name}"
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 font-normal"
+                        onClick={() => addAudioToSequence(clip)}
+                      >
+                        <PlusCircle className="mr-2 h-3 w-3" /> {clip.name}
+                      </Button>
+                      <div className="w-px h-4 bg-border mx-1"></div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => deleteAvailableClip(clip.id)}
+                        title="Delete clip"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -528,9 +532,9 @@ const SequenceTester = () => {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>2. Build and Play Sequence</CardTitle>
-            <Button onClick={playSequence}>
+            <Button onClick={playSequence} size="lg" className="w-40">
               {isPlaying ? (
-                <Square className="mr-2 h-4 w-4" />
+                <Square className="mr-2 h-4 w-4 fill-current" />
               ) : (
                 <Play className="mr-2 h-4 w-4" />
               )}
@@ -543,7 +547,7 @@ const SequenceTester = () => {
               collisionDetection={closestCenter}
               onDragEnd={handleDragEnd}
             >
-              <div className="space-y-2">
+              <div className="flex flex-col">
                 <SortableContext
                   items={sequence.map((i) => i.id)}
                   strategy={verticalListSortingStrategy}

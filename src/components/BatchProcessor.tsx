@@ -26,6 +26,7 @@ import {
   AlertCircle,
   Wand2,
   Square,
+  Archive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -370,7 +371,6 @@ const BatchProcessor = () => {
   };
 
   const deleteItem = (id: string) => {
-    // If playing this item, stop audio
     if (playingId === id) {
       audioPlayerRef.current?.pause();
       setPlayingId(null);
@@ -382,45 +382,54 @@ const BatchProcessor = () => {
     if (!item.processedUrl) return;
     const a = document.createElement("a");
     a.href = item.processedUrl;
+    // Naming convention: <original>_processed.wav
     const nameParts = item.file.name.split(".");
-    // const ext = nameParts.pop();
+    if (nameParts.length > 1) nameParts.pop(); // remove extension
     const name = nameParts.join(".");
-    a.download = `${name}-batch.wav`;
+    a.download = `${name}_processed.wav`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
+  const downloadAllProcessed = () => {
+    // Downloads all 'done' items sequentially
+    const doneItems = items.filter((i) => i.status === "done");
+    let delay = 0;
+    doneItems.forEach((item) => {
+      setTimeout(() => downloadItem(item), delay);
+      delay += 500; // Stagger downloads slightly to prevent browser blocking
+    });
+  };
+
   const togglePreview = (item: AudioItem) => {
     if (playingId === item.id) {
-      // Stop
       audioPlayerRef.current?.pause();
       setPlayingId(null);
       return;
     }
 
-    // Stop current
     if (audioPlayerRef.current) {
       audioPlayerRef.current.pause();
     }
 
-    // Determine URL: Processed > Original
     let src = item.processedUrl;
     if (!src) {
-      // Fallback to original file blob
       src = URL.createObjectURL(item.file);
     }
 
     const audio = new Audio(src);
     audio.onended = () => {
       setPlayingId(null);
-      // Clean up temporary blob if it was original file
       if (!item.processedUrl) URL.revokeObjectURL(src!);
     };
     audio.play();
     audioPlayerRef.current = audio;
     setPlayingId(item.id);
   };
+
+  // Count ready items for the "Download All" button state
+  const readyCount = items.filter((i) => i.status === "done").length;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-12rem)]">
@@ -581,11 +590,20 @@ const BatchProcessor = () => {
               variant="secondary"
               onClick={() => setItems([])}
               disabled={items.length === 0}
+              title="Clear List"
             >
-              Clear All
+              Clear
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={downloadAllProcessed}
+              disabled={readyCount === 0}
+              title="Download All Processed"
+            >
+              <Archive className="mr-2 h-4 w-4" /> Save All ({readyCount})
             </Button>
             <Button onClick={runBatchProcessing} disabled={items.length === 0}>
-              <Wand2 className="mr-2 h-4 w-4" /> Process All Pending
+              <Wand2 className="mr-2 h-4 w-4" /> Process All
             </Button>
           </div>
         </CardHeader>
